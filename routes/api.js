@@ -32,7 +32,7 @@ const sqlQuery = (query, data) => {
 	})
 }
 
-const checkUser = (student_id, callback) => {
+const checkUser = (student_id) => {
 	sqlQuery(`SELECT * FROM student WHERE Student_ID = ${student_id}`).catch(error => {
 		console.error(error);
 	}).then(data => {
