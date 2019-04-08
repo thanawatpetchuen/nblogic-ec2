@@ -17,25 +17,27 @@ var connection = mysql.createPool({
 	multipleStatements: true
 });
 
+const queryHandle = (resolve, reject, result, error) => {
+	if(error) {console.error(error); reject(error)}
+	resolve(result);
+}
+
 const sqlQuery = (query, data) => {
 	return new Promise((resolve, reject) => {
-		data?connection.query(query, data, (error, results, fields) => {
-			if(error) {console.error(error); reject(error)}
-			resolve(results);
-		}):connection.query(query, (error, results, fields) => {
-			if(error) {console.error(error); reject(error)}
-			resolve(results);
+		data?connection.query(query, data, (error, result) => {
+			queryHandle(resolve, reject, result, error)
+		}):connection.query(query, (error, result) => {
+			queryHandle(resolve, reject, result, error)
 		})
 	})
 }
 
 const checkUser = (student_id, callback) => {
-	sqlQuery(`SELECT * FROM student WHERE Student_ID = ${student_id}`)
-	connection.query(`SELECT * FROM student WHERE Student_ID = ${student_id}`, function (error, results, fields) {
-    if (error) console.error(error);
-		var check = results.length == 0 ?  false : true;
-		callback(check); 
-    });
+	sqlQuery(`SELECT * FROM student WHERE Student_ID = ${student_id}`).catch(error => {
+		console.error(error);
+	}).then(data => {
+		return results.length == 0 ?  false : true;
+	})
 }
 
 const getUserData = (username) => {
