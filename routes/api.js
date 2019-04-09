@@ -83,7 +83,9 @@ router.get('/db/user/:userId', cors(), (req, res, next) => {
 		getUserAttemps(userId).catch(error => {
 			res.status(500).send(error)
 		}).then(attemp_result => {
-			res.send({"User_Bio": data_result[0], "Attemps": nestedGroup(attemp_result, "Year", "Semester")});
+			// res.send({"User_Bio": data_result[0], "Attemps": nestedGroup(attemp_result, "Year", "Semester")});
+			res.send({"User_Bio": data_result[0], "Attemps": attemp_result});
+
 		})
 	})
 });
@@ -120,9 +122,15 @@ router.post('/klogic', cors(), function(req, res, next) {
 				var full_course = results_json['User_Summary'];
 				sqlQuery("INSERT INTO student SET ?", user_bio).then(result => {
 					console.log("INSERT STUDENT SUCCESS");
-					return sqlQuery(`UPDATE student SET GPAX = ${user_bio.GPAX} WHERE Student_ID = "${user_bio.Student_ID}"`)
-				}).catch(errorHandle).then(result => {
-					console.log("UPDATE GPAX SUCCESS");
+					sqlQuery(`UPDATE student SET GPAX = ${user_bio.GPAX} WHERE Student_ID = "${user_bio.Student_ID}"`).then(() => {
+						console.log("UPDATE GPAX SUCCESS ");
+					})
+				}).catch(error => {
+					console.error("ERROR "+error.sqlMessage)
+					sqlQuery(`UPDATE student SET GPAX = ${user_bio.GPAX} WHERE Student_ID = "${user_bio.Student_ID}"`).then(result => {
+						console.log("UPDATE GPAX SUCCESS FROM CATCH");
+					})
+				}).then(() => {
 					return sqlQuery("INSERT IGNORE INTO course (Name, Course_id, Credit_points) VALUES ?", [full_course.all_course.map(course =>
 						[course.Name, course.Course_id, course.Credit_points])])
 				}).catch(errorHandle).then(result => {

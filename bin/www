@@ -13,7 +13,7 @@ var fs = require("fs");
  * Get port from environment and store in Express.
  */
 
-var port = normalizePort(443);
+var port = normalizePort(8443);
 app.set('port', port);
 
 /**
