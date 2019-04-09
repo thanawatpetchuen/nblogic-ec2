@@ -5,6 +5,7 @@ const {PythonShell} =  require('python-shell');
 var cors = require('cors');
 var mysql = require('mysql');
 const nblogic_node = '/home/ec2-user/nblogic/routes/nblogic_node.py';
+var _ = require('lodash');
 require('dotenv').config()
 
 var connection = mysql.createPool({
@@ -17,9 +18,21 @@ var connection = mysql.createPool({
 	multipleStatements: true
 });
 
+const nestedGroup = (array, first, second) => {
+	var groupedFirst = _.groupBy(array, first);
+	_.forEach(groupedFirst, (val, key) => {
+		groupedFirst[key] = _.groupBy(val, second)
+	})
+	return groupedFirst
+}
+
 const queryHandle = (resolve, reject, result, error) => {
 	if(error) {console.error(error); reject(error)}
-	resolve(result);
+	else{resolve(result);}
+}
+
+const errorHandle = (error) => {
+	console.error("ERROR "+error);
 }
 
 const sqlQuery = (query, data) => {
@@ -32,12 +45,8 @@ const sqlQuery = (query, data) => {
 	})
 }
 
-const checkUser = (student_id) => {
-	sqlQuery(`SELECT * FROM student WHERE Student_ID = ${student_id}`).catch(error => {
-		console.error(error);
-	}).then(data => {
-		return results.length == 0 ?  false : true;
-	})
+const getCurrentUsers = () => {
+	return sqlQuery(`SELECT COUNT(*) as Count, TRUNCATE(AVG(GPAX),2) as AVG FROM student`)
 }
 
 const getUserData = (username) => {
@@ -45,7 +54,9 @@ const getUserData = (username) => {
 }
 
 const getUserAttemps = (username) => {
-	return sqlQuery(`SELECT Course_id, Year, Semester, Grade FROM attemps WHERE attemps.Student_ID = ${username}`)
+	return sqlQuery(`SELECT attemps.Course_id, Name, Year, Semester, Grade FROM attemps INNER JOIN course 
+	 ON course.Course_id = attemps.Course_id WHERE attemps.Student_ID = ${username}
+	 `)
 }
 
 router.get('/db/users', cors(), (req, res, next) => {
@@ -56,17 +67,23 @@ router.get('/db/users', cors(), (req, res, next) => {
 	})
 });
 
+router.get('/db/totalusers', cors(), (req, res, next) => {
+	getCurrentUsers().catch(error => {
+		res.status(500).send(error)
+	}).then(data => {
+		res.send(data[0]);
+	})
+});
+
 router.get('/db/user/:userId', cors(), (req, res, next) => {
 	var userId = req.params.userId;
 	getUserData(userId).catch(error => {
 		res.status(500).send(error)
 	}).then(data_result => {
-		return data_result
-	}).then(data_result => {
 		getUserAttemps(userId).catch(error => {
 			res.status(500).send(error)
 		}).then(attemp_result => {
-			res.send({"User_Bio": data_result[0], "Attemps": attemp_result});
+			res.send({"User_Bio": data_result[0], "Attemps": nestedGroup(attemp_result, "Year", "Semester")});
 		})
 	})
 });
@@ -89,41 +106,45 @@ router.post('/klogic', cors(), function(req, res, next) {
 		pythonPath: '/usr/bin/python3.7',
 	}
 	console.log(req.body)
-	if(username && password){
-			PythonShell.run(nblogic_node, options, function  (err, results)  {
-				if  (err) {
-					res.status(500).send(err);
-				}
-				console.log('nblogic_node finished.');
-				console.log(results)
-				results_json = JSON.parse(results);
-				if(results_json !== null){
-					api_mode?res.send(results_json):res.render('profile', { title: "NBLOGIC", data: results_json['User_Bio'] });
-					var values = [];
-					let user_bio = results_json['User_Bio']
-					var full_course = results_json['User_Summary'];			
-
-					sqlQuery("INSERT INTO student SET ?", user_bio).catch(error => console.log(error?'ERROR INSERT student '+error:"SUCCESS")).then(result => {
-						return sqlQuery("INSERT IGNORE INTO course (Name, Course_id, Credit_points) VALUES ?", [full_course.all_course.map(course =>
-							[course.Name, course.Course_id, course.Credit_points])])
-					}).catch(error => console.log(error?"ERROR INSERT Course":"SUCCESS INSERT Course")).then(result => {
-						return sqlQuery("INSERT IGNORE INTO attemps (Student_id, Course_id, Year, Semester, Grade) VALUES ?", [full_course.attemp.map(attemp =>
-							[attemp.Student_id, attemp.Course_id, attemp.Year, attemp.Semester, attemp.Grade])])
-					}).catch(error => console.log(error?`ERROR INSERT Attemp ${error}`:"SUCCESS INSERT Attemp")).then(result => {
-						return sqlQuery("INSERT IGNORE INTO contains (Program_id, Course_id) VALUES ?", [full_course.all_course.map(course_ =>
-							[full_course.User_info.Program_ID, course_.Course_id])])
-					}).catch(error => console.log(error?`ERROR INSERT Contains ${error}`:"SUCCESS INSERT Contains")).then(result => {
-						results_json = null;
-					})
-				}
-				else{
-					res.status(500).send('Something broke!')
-				}
-			});
-	}else{
+	if (username && password) {
+		PythonShell.run(nblogic_node, options, function (err, results) {
+			if (err) {
+				res.status(500).send(err);
+			}
+			console.log('nblogic_node finished.');
+			console.log(results)
+			results_json = JSON.parse(results);
+			if (results_json !== null) {
+				api_mode ? res.send(results_json) : res.render('profile', { title: "NBLOGIC", data: results_json['User_Bio'] });
+				let user_bio = results_json['User_Bio']
+				var full_course = results_json['User_Summary'];
+				sqlQuery("INSERT INTO student SET ?", user_bio).then(result => {
+					console.log("INSERT STUDENT SUCCESS");
+					return sqlQuery(`UPDATE student SET GPAX = ${user_bio.GPAX} WHERE Student_ID = "${user_bio.Student_ID}"`)
+				}).catch(errorHandle).then(result => {
+					console.log("UPDATE GPAX SUCCESS");
+					return sqlQuery("INSERT IGNORE INTO course (Name, Course_id, Credit_points) VALUES ?", [full_course.all_course.map(course =>
+						[course.Name, course.Course_id, course.Credit_points])])
+				}).catch(errorHandle).then(result => {
+					console.log("INSERT COURSE SUCCESS")
+					return sqlQuery("INSERT IGNORE INTO attemps (Student_id, Course_id, Year, Semester, Grade) VALUES ?", [full_course.attemp.map(attemp =>
+						[attemp.Student_id, attemp.Course_id, attemp.Year, attemp.Semester, attemp.Grade])])
+				}).catch(errorHandle).then(result => {
+					console.log("INSERT Attemps SUCCESS")
+					return sqlQuery("INSERT IGNORE INTO contains (Program_id, Course_id) VALUES ?", [full_course.all_course.map(course_ =>
+						[full_course.User_info.Program_ID, course_.Course_id])])
+				}).catch(errorHandle).then(result => {
+					console.log("INSERT Contains SUCCESS")
+					results_json = null;
+				}).catch(errorHandle)
+			}
+			else {
+				res.status(500).send('Something broke!')
+			}
+		});
+	} else {
 		res.status(401).send("Unauthorize!")
 	}
 });
   
 module.exports = {router, getUserData};
-
